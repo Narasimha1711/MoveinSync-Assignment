@@ -1,156 +1,197 @@
 import { useEffect, useState } from 'react';
 import API from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 export default function Dashboard() {
   const [stats, setStats] = useState({ Critical: 0, Warning: 0, Info: 0 });
   const [topOffenders, setTopOffenders] = useState([]);
   const [autoClosed, setAutoClosed] = useState([]);
+  const [filter, setFilter] = useState('24h'); // 24h or 7d
+  const [trendData, setTrendData] = useState([]);
   const [recentAlerts, setRecentAlerts] = useState([]);
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [alertHistory, setAlertHistory] = useState([]);
+  const [rules, setRules] = useState({});
   const { logout } = useAuth();
 
-  const fetchData = async () => {
+  const fetchAll = async () => {
     try {
-      const [statsRes, topRes, closedRes, alertsRes] = await Promise.all([
+      const [s, t, a, alerts, trend] = await Promise.all([
         API.get('/alerts/stats'),
         API.get('/alerts/top-offenders'),
         API.get('/alerts/auto-closed'),
-        API.get('/alerts')  // This now works!
+        API.get('/alerts'),
+        fetchTrendData()
       ]);
+      setStats(s.data);
+      setTopOffenders(t.data);
+      setAutoClosed(a.data);
+      setRecentAlerts(alerts.data);
+      setTrendData(trend);
+    } catch (err) { }
+  };
 
-      setStats(statsRes.data);
-      setTopOffenders(topRes.data);
-      setAutoClosed(closedRes.data);
-      setRecentAlerts(alertsRes.data);
-    } catch (err) {
-      console.error("Fetch failed:", err.response?.data || err.message);
-    }
+  const fetchTrendData = async () => {
+    // Mock daily trend (replace with real aggregation in production)
+    try {
+        const res = await API.get('/alerts/trends'); // NEW ENDPOINT
+        return res.data; // Returns array like [{date: "2025-11-20", total: 45, escalated: 8, closed: 30}, ...]
+      } catch {
+        return []; // fallback
+      }
   };
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
+    fetchAll();
+    const interval = setInterval(fetchAll, 5000);
+    fetch('http://localhost:5001/rules.config.json')
+      .then(r => r.json())
+      .then(setRules);
     return () => clearInterval(interval);
   }, []);
 
-  const openAlertDetails = async (alert) => {
+  useEffect(() => {
+    const load = async () => {
+      const trend = await fetchTrendData();
+      setTrendData(trend.length > 0 ? trend : [
+        { date: 'No Data', total: 0, escalated: 0, closed: 0 }
+      ]);
+    };
+    load();
+    const int = setInterval(load, 10000);
+    return () => clearInterval(int);
+  })
+
+  const openDetails = async (alert) => {
     setSelectedAlert(alert);
-    try {
-      const res = await API.get(`/alerts/${alert.alertId}/history`);
-      setAlertHistory(res.data);
-    } catch (err) {
-      setAlertHistory([]);
-    }
+    const res = await API.get(`/alerts/${alert.alertId}/history`);
+    setAlertHistory(res.data);
   };
 
   const resolveAlert = async () => {
     await API.patch(`/alerts/${selectedAlert.alertId}/resolve`);
     setSelectedAlert(null);
-    fetchData();
+    fetchAll();
   };
 
+  const filteredClosed = autoClosed.filter(a => {
+    const hours = (Date.now() - new Date(a.autoClosedAt)) / 3600000;
+    return filter === '24h' ? hours <= 24 : hours <= 168;
+  });
+
   return (
-    <div style={{ padding: '30px', background: '#f8fafc', minHeight: '100vh', fontFamily: 'Segoe UI, sans-serif' }}>
+    <div style={{ padding: '30px', background: '#f8fafc', minHeight: '100vh', fontFamily: 'Segoe UI' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
-        <h1 style={{ fontSize: '32px', color: '#1e40af', fontWeight: 'bold' }}>
+        <h1 style={{ fontSize: '34px', color: '#1e40af', fontWeight: 'bold' }}>
           Intelligent Alert Escalation System
         </h1>
-        <button onClick={logout} style={{ padding: '12px 24px', background: '#dc2626', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold' }}>
+        <button onClick={logout} style={{ padding: '12px 24px', background: '#dc2626', color: 'white', border: 'none', borderRadius: '8px' }}>
           Logout
         </button>
       </div>
 
-      {/* Live Stats */}
+      {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '25px', marginBottom: '40px' }}>
-        <div style={{ background: '#fee2e2', padding: '30px', borderRadius: '16px', textAlign: 'center' }}>
-          <h2 style={{ fontSize: '56px', color: '#dc2626' }}>{stats.Critical || 0}</h2>
-          <p style={{ fontSize: '22px', fontWeight: 'bold', color: '#991b1b' }}>Critical</p>
-        </div>
-        <div style={{ background: '#fef3c7', padding: '30px', borderRadius: '16px', textAlign: 'center' }}>
-          <h2 style={{ fontSize: '56px', color: '#d97706' }}>{stats.Warning || 0}</h2>
-          <p style={{ fontSize: '22px', fontWeight: 'bold', color: '#92400e' }}>Warning</p>
-        </div>
-        <div style={{ background: '#dbeafe', padding: '30px', borderRadius: '16px', textAlign: 'center' }}>
-          <h2 style={{ fontSize: '56px', color: '#2563eb' }}>{stats.Info || 0}</h2>
-          <p style={{ fontSize: '22px', fontWeight: 'bold', color: '#1e40af' }}>Info</p>
-        </div>
+        {['Critical', 'Warning', 'Info'].map((s, i) => (
+          <div key={s} style={{ background: ['#fee2e2', '#fef3c7', '#dbeafe'][i], padding: '30px', borderRadius: '16px', textAlign: 'center' }}>
+            <h2 style={{ fontSize: '56px', color: ['#dc2626', '#d97706', '#2563eb'][i] }}>{stats[s] || 0}</h2>
+            <p style={{ fontSize: '22px', fontWeight: 'bold' }}>{s} Alerts</p>
+          </div>
+        ))}
       </div>
 
-      {/* Rest of your beautiful dashboard */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '40px' }}>
+        {/* Top Offenders */}
         <div style={{ background: 'white', padding: '30px', borderRadius: '16px', boxShadow: '0 6px 20px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ fontSize: '26px', marginBottom: '20px', color: '#dc2626' }}>Top 5 Offenders</h2>
-          {topOffenders.length === 0 ? <p>No data</p> : (
-            <table style={{ width: '100%' }}>
-              <thead><tr><th>Rank</th><th>Driver</th><th>Count</th></tr></thead>
-              <tbody>
-                {topOffenders.map((d, i) => (
-                  <tr key={d._id}><td>#{i+1}</td><td>{d._id}</td><td style={{color:'red',fontWeight:'bold'}}>{d.count}</td></tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          <h2 style={{ fontSize: '26px', color: '#dc2626', marginBottom: '20px' }}>Top 5 Offenders</h2>
+          <table style={{ width: '100%' }}><tbody>
+            {topOffenders.map((d, i) => (
+              <tr key={d._id}><td>#{i+1}</td><td><strong>{d._id}</strong></td><td style={{color:'red',fontWeight:'bold'}}>{d.count}</td></tr>
+            ))}
+          </tbody></table>
         </div>
 
+        {/* Auto-Closed with Filter */}
         <div style={{ background: 'white', padding: '30px', borderRadius: '16px', boxShadow: '0 6px 20px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ fontSize: '26px', marginBottom: '20px', color: '#16a34a' }}>Recent Auto-Closed</h2>
-          {autoClosed.length === 0 ? <p>No auto-closed yet</p> : autoClosed.slice(0,5).map(a => (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <h2 style={{ fontSize: '26px', color: '#16a34a' }}>Recent Auto-Closed</h2>
+            <select value={filter} onChange={(e) => setFilter(e.target.value)} style={{ padding: '8px', borderRadius: '8px' }}>
+              <option value="24h">Last 24 Hours</option>
+              <option value="7d">Last 7 Days</option>
+            </select>
+          </div>
+          {filteredClosed.map(a => (
             <div key={a.alertId} style={{ background: '#f0fdf4', padding: '12px', margin: '8px 0', borderRadius: '8px', border: '1px solid #86efac' }}>
-              <strong>{a.sourceType}</strong> - {a.metadata.driverId}<br/>
-              <small style={{color:'#16a34a'}}>{a.autoClosedReason}</small>
+              <strong>{a.sourceType}</strong> → {a.autoClosedReason}<br/>
+              <small>{a.metadata.driverId} • {new Date(a.autoClosedAt).toLocaleString()}</small>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Recent Alerts Table */}
-      <div style={{ marginTop: '40px', background: 'white', padding: '30px', borderRadius: '16px' }}>
-        <h2 style={{ fontSize: '26px', marginBottom: '20px', color: '#7c3aed' }}>Recent Alerts (Click Row)</h2>
+      {/* Trend Chart */}
+      <div style={{ background: 'white', padding: '30px', borderRadius: '16px', marginBottom: '40px', boxShadow: '0 6px 20px rgba(0,0,0,0.1)' }}>
+        <h2 style={{ fontSize: '26px', color: '#7c3aed', marginBottom: '20px' }}>Alert Trends (Last 7 Days)</h2>
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={trendData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="date" />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            <Line type="monotone" dataKey="total" stroke="#3b82f6" name="Total Alerts" strokeWidth={3} />
+            <Line type="monotone" dataKey="escalated" stroke="#dc2626" name="Escalated" strokeWidth={3} />
+            <Line type="monotone" dataKey="closed" stroke="#16a34a" name="Auto-Closed" strokeWidth={3} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Recent Alerts + Drill-Down */}
+      <div style={{ background: 'white', padding: '30px', borderRadius: '16px', boxShadow: '0 6px 20px rgba(0,0,0,0.1)' }}>
+        <h2 style={{ fontSize: '26px', color: '#7c3aed', marginBottom: '20px' }}>Recent Alerts Timeline (Click for Details)</h2>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead style={{ background: '#f1f5f9' }}>
-            <tr>
-              <th style={{ padding: '15px', textAlign: 'left' }}>Time</th>
-              <th style={{ padding: '15px', textAlign: 'left' }}>Type</th>
-              <th style={{ padding: '15px', textAlign: 'left' }}>Driver</th>
-              <th style={{ padding: '15px', textAlign: 'left' }}>Status</th>
-            </tr>
+            <tr><th>Time</th><th>Type</th><th>Driver</th><th>Severity</th><th>Status</th></tr>
           </thead>
           <tbody>
             {recentAlerts.slice(0, 10).map(a => (
-              <tr key={a.alertId} onClick={() => openAlertDetails(a)} style={{ cursor: 'pointer', background: recentAlerts.indexOf(a)%2===0 ? '#fdfdfe' : 'white' }}>
-                <td style={{ padding: '15px' }}>{new Date(a.createdAt).toLocaleString()}</td>
-                <td style={{ padding: '15px' }}>{a.sourceType}</td>
-                <td style={{ padding: '15px' }}>{a.metadata.driverId}</td>
-                <td style={{ padding: '15px', fontWeight: 'bold', color: a.status === 'ESCALATED' ? 'red' : a.status === 'AUTO-CLOSED' ? 'green' : 'purple' }}>
-                  {a.status}
-                </td>
+              <tr key={a.alertId} onClick={() => openDetails(a)} style={{ cursor: 'pointer' }}>
+                <td>{new Date(a.createdAt).toLocaleString()}</td>
+                <td>{a.sourceType}</td>
+                <td>{a.metadata.driverId}</td>
+                <td><span style={{ background: a.severity === 'Critical' ? '#fee2e2' : '#fef3c7', padding: '4px 12px', borderRadius: '20px', color: a.severity === 'Critical' ? '#dc2626' : '#d97706' }}>{a.severity}</span></td>
+                <td style={{ fontWeight: 'bold', color: a.status === 'ESCALATED' ? 'red' : a.status === 'AUTO-CLOSED' ? 'green' : 'purple' }}>{a.status}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
+      {/* Configuration Overview (Bonus) */}
+      <div style={{ marginTop: '40px', background: '#f8fafc', padding: '25px', borderRadius: '16px', border: '2px dashed #7c3aed' }}>
+        <h2 style={{ fontSize: '26px', color: '#7c3aed' }}>Active Rule Configuration</h2>
+        <pre style={{ background: 'white', padding: '20px', borderRadius: '12px', overflowX: 'auto' }}>
+          {JSON.stringify(rules, null, 2)}
+        </pre>
+      </div>
+
       {/* Modal */}
       {selectedAlert && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}>
-          <div style={{ background: 'white', padding: '30px', borderRadius: '16px', width: '600px' }}>
-            <h3 style={{ fontSize: '24px', color: '#1e40af' }}>Alert Details</h3>
-            <p><strong>ID:</strong> {selectedAlert.alertId}</p>
+          <div style={{ background: 'white', padding: '30px', borderRadius: '16px', width: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <h3 style={{ fontSize: '24px', color: '#1e40af' }}>Alert Details & History</h3>
             <p><strong>Driver:</strong> {selectedAlert.metadata.driverId}</p>
             <p><strong>Status:</strong> <span style={{ color: selectedAlert.status === 'ESCALATED' ? 'red' : 'green' }}>{selectedAlert.status}</span></p>
-            
-            <h4 style={{ margin: '20px 0 10px' }}>History</h4>
+            <h4>State History:</h4>
             {alertHistory.map(h => (
-              <div key={h._id} style={{ background: '#f8fafc', padding: '10px', margin: '5px 0', borderRadius: '8px' }}>
-                {h.fromStatus} → <strong>{h.toStatus}</strong> ({h.reason})
+              <div key={h._id} style={{ background: '#f1f5f9', padding: '10px', margin: '5px 0', borderRadius: '8px' }}>
+                {h.fromStatus || '—'} → <strong>{h.toStatus}</strong> ({h.reason})
               </div>
             ))}
-
             {selectedAlert.status !== 'RESOLVED' && selectedAlert.status !== 'AUTO-CLOSED' && (
               <button onClick={resolveAlert} style={{ marginTop: '20px', padding: '12px 24px', background: '#7c3aed', color: 'white', border: 'none', borderRadius: '8px' }}>
-                Resolve Manually
+                Manually Resolve
               </button>
             )}
             <button onClick={() => setSelectedAlert(null)} style={{ marginLeft: '10px', padding: '12px 24px', background: '#64748b', color: 'white', border: 'none', borderRadius: '8px' }}>
