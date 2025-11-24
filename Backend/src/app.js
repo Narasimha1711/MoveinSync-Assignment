@@ -25,7 +25,8 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/alerts', alertRoutes);
 
-cron.schedule('*/3 * * * *', () => {
+// cron.schedule('*/0.5 * * * *', () => {
+cron.schedule('*/30 * * * * *', () => {
   console.log('Running auto-close job...');
   runAutoCloseJob();
 });
