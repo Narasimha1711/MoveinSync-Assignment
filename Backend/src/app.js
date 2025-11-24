@@ -20,7 +20,7 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
-app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000 }));
+// app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000 }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/alerts', alertRoutes);
