@@ -24,7 +24,7 @@
 - Frontend: React 18 + Vite + Tailwind + Recharts
 - Architecture: MVC + Service Layer + Background Worker
 
-## How to Run Demo (8-Minute Video Script)
+## How to Run Demo 
 ```bash
 # 1. Start backend & frontend
 npm run dev    # backend (port 5001)
