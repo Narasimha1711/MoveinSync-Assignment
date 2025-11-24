@@ -27,7 +27,7 @@
 ## How to Run Demo 
 ```bash
 # 1. Start backend & frontend
-npm run dev    # backend (port 5001)
+nodemon server.js    # backend (port 5001)
 npm run dev    # frontend (port 5173)
 
 # 2. Run demo script
